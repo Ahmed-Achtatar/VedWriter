@@ -16,7 +16,7 @@ VedWriter is an open-source journal and study-notes app built with React and Tau
 
 ## Screenshot
 
-![VedWriter journal interface](src/assets/hero.png)
+![VedWriter journal interface](docs/screenshots/User%20attachment.png)
 
 ## Download
 
