@@ -1,0 +1,32 @@
+name: Bug report
+description: Report a reproducible problem in VedWriter
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: "Remove passwords, journal text, exported backups, and other private data before submitting."
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, version/commit, and web or desktop
+    validations:
+      required: true

@@ -43,14 +43,6 @@ export default function Sidebar({
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [groupsOpen, setGroupsOpen] = useState({ pinned: true, today: true, week: true });
 
-  const formatPreview = (html) => {
-    if (!html) return 'Empty page...';
-    const text = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-    return text.slice(0, 90) + (text.length > 90 ? '...' : '');
-  };
-
-  const formatDate = (ts) => ts ? new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
-
   // Group entries
   const grouped = React.useMemo(() => {
     const pinned = [];
