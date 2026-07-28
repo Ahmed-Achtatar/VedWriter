@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { LogOut, ChevronLeft, Palette, Menu, X } from 'lucide-react';
+import { LogOut, ChevronLeft, Palette, Menu, X, Zap } from 'lucide-react';
 import { THEMES, loadTheme, setTheme } from '../theme';
 
 export default function Header({
@@ -11,7 +11,8 @@ export default function Header({
   onDeleteJournal,
   mobileMenuOpen,
   onToggleMobileMenu,
-  showBackup = true
+  showBackup = true,
+  onQuickCapture
 }) {
   const [currentTheme, setCurrentTheme] = useState(loadTheme());
   const [menuOpen, setMenuOpen] = useState(false);
@@ -66,6 +67,18 @@ export default function Header({
           </button>
         )}
 
+        {onQuickCapture && (
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={onQuickCapture}
+            title="Quick Capture (Alt+Space)"
+            style={{ display: 'flex', alignItems: 'center', gap: '5px' }}
+          >
+            <Zap size={14} style={{ color: 'var(--accent)' }} />
+            Quick Capture
+          </button>
+        )}
+
         <div className="theme-picker" ref={menuRef}>
           <button
             className="theme-trigger"
@@ -98,6 +111,7 @@ export default function Header({
             Backup / Restore
           </button>
         )}
+
 
         {variant === 'workspace' && onDeleteJournal && (
           <button className="btn btn-danger btn-sm" onClick={onDeleteJournal} title="Delete this journal and all its pages">

@@ -1623,3 +1623,228 @@ kbd.kbd {
     align-items: stretch;
   }
 }
+
+/* =====================================================
+   UNIFIED ATTACHMENT CARD & SLASH COMMANDS MENU
+   ===================================================== */
+
+.unified-attachment-card {
+  margin: 18px 0;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  transition: var(--transition);
+  user-select: none;
+}
+
+.unified-attachment-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+}
+
+.unified-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.unified-card-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unified-card-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+}
+
+.unified-card-name {
+  font-weight: 600;
+}
+
+.unified-card-size {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.unified-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.unified-card-actions button {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition);
+}
+
+.unified-card-actions button:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.unified-card-body {
+  padding: 12px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: var(--bg-secondary);
+}
+
+.unified-card-img {
+  max-width: 100%;
+  max-height: 450px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+}
+
+.unified-card-audio {
+  width: 100%;
+  border-radius: var(--radius-sm);
+}
+
+.unified-card-doc-preview {
+  padding: 16px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.slash-menu {
+  position: absolute;
+  z-index: 999;
+  width: 240px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.slash-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.slash-menu-item:hover,
+.slash-menu-item.selected {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.slash-menu-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+
+/* =====================================================
+   TRIANGULAR DRAFT PAPER FLAP (WARM YELLOW STICKY NOTE)
+   ===================================================== */
+
+.paper-stack-container {
+  position: relative;
+  width: 100%;
+  max-width: 820px;
+  margin: 0 auto;
+}
+
+.paper-triangular-flap {
+  position: absolute;
+  right: -60px;
+  width: 70px;
+  height: 76px;
+  background: linear-gradient(135deg, #FEF08A 0%, #FDE047 100%);
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+  filter: drop-shadow(4px 4px 8px rgba(202, 138, 4, 0.35));
+  cursor: pointer;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-left: 10px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.paper-triangular-flap:hover {
+  right: -66px;
+  background: linear-gradient(135deg, #FEF08A 0%, #FACC15 100%);
+  filter: drop-shadow(6px 6px 14px rgba(202, 138, 4, 0.48));
+}
+
+.paper-triangular-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #713F12;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+
+
+.stacked-paper-add {
+  position: absolute;
+  top: -28px;
+  right: 0px;
+  z-index: 15;
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: var(--transition);
+  box-shadow: var(--shadow);
+}
+
+.stacked-paper-add:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+
+
+

@@ -3,8 +3,12 @@ import {
   Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight,
   List, ListOrdered, FileDown, Trash2, Calendar, BookOpen, Tag,
   Undo2, Redo2, Maximize2, Minimize2, ListTree, Search, X,
-  Plus, Minus, Target, ChevronUp, ChevronDown
+  Plus, Minus, Target, ChevronUp, ChevronDown, Paperclip, Layers
 } from 'lucide-react';
+
+import DraftSheetCanvas from './DraftSheetCanvas';
+
+
 
 // Writing prompts for blank pages
 const WRITING_PROMPTS = [
@@ -58,6 +62,28 @@ export default function Editor({
   const [findCount, setFindCount] = useState(0);
   const [replaceValue, setReplaceValue] = useState('');
   const [wordGoal, setWordGoal] = useState(0);
+
+  // Slash menu state
+  const [slashMenu, setSlashMenu] = useState({ show: false, query: '', selectedIndex: 0 });
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const dataUrl = evt.target.result;
+        insertAttachmentCard(file, dataUrl);
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
+  };
+
+
+
   const [showGoalInput, setShowGoalInput] = useState(false);
   const [goalInput, setGoalInput] = useState('');
 
@@ -67,11 +93,52 @@ export default function Editor({
   const saveTimerRef = useRef(null);
   const historyRef = useRef({ stack: [], index: -1, maxSize: 100 });
 
+  // Draft sheets state (stacked behind page)
+  const [drafts, setDrafts] = useState([]);
+  const [activeDraftIndex, setActiveDraftIndex] = useState(null);
+  const [isDraftOpen, setIsDraftOpen] = useState(false);
+
+  const createNewDraft = () => {
+    const newDrafts = [...drafts, ''];
+    setDrafts(newDrafts);
+    setActiveDraftIndex(newDrafts.length - 1);
+    setIsDraftOpen(true);
+    handleSaveImmediate({ drafts: newDrafts });
+  };
+
+  const openDraft = (index) => {
+    setActiveDraftIndex(index);
+    setIsDraftOpen(true);
+  };
+
+  const handleSaveDraft = (index, draftData) => {
+    const idx = index !== undefined && index !== null ? index : activeDraftIndex;
+    if (idx === null || idx < 0) return;
+    const updated = [...drafts];
+    updated[idx] = draftData;
+    setDrafts(updated);
+    handleSaveImmediate({ drafts: updated });
+  };
+
+
+  const handleDeleteDraft = (indexToDelete) => {
+    const updated = drafts.filter((_, idx) => idx !== indexToDelete);
+    setDrafts(updated);
+    setActiveDraftIndex(null);
+    setIsDraftOpen(false);
+    handleSaveImmediate({ drafts: updated });
+  };
+
+  const handleInsertDraftToEditor = (dataUrl, filename) => {
+    insertAttachmentCard({ name: filename, type: 'image/png', size: 0 }, dataUrl);
+  };
+
   // Sync from props only when switching entries
   useEffect(() => {
     if (!entry) {
       setTitle('');
       setTags([]);
+      setDrafts([]);
       if (editorRef.current) {
         editorRef.current.innerHTML = '';
         lastBodyRef.current = '';
@@ -88,6 +155,7 @@ export default function Editor({
     if (entry.id !== lastEntryIdRef.current) {
       setTitle(entry.title || '');
       setTags(entry.tags || []);
+      setDrafts(entry.drafts || []);
       const newBody = entry.body || '';
       if (editorRef.current) {
         editorRef.current.innerHTML = newBody;
@@ -101,6 +169,7 @@ export default function Editor({
       setWordGoal(entry.wordGoal || 0);
     }
   }, [entry]);
+
 
   useEffect(() => {
     if (isFocusMode) {
@@ -148,11 +217,13 @@ export default function Editor({
     ...entry,
     title,
     tags,
+    drafts,
     body: editorRef.current ? editorRef.current.innerHTML : '',
     wordGoal,
     dateModified: Date.now(),
     ...overrides
   });
+
 
   const handleSave = (overrides = {}) => {
     if (!entry) return;
@@ -276,6 +347,225 @@ export default function Editor({
       }
     }
   };
+
+  // Slash commands catalog
+  const SLASH_COMMANDS = [
+    { id: 'h1', name: 'Heading 1', desc: 'Large title heading', icon: 'H1', action: 'h1' },
+    { id: 'h2', name: 'Heading 2', desc: 'Medium section heading', icon: 'H2', action: 'h2' },
+    { id: 'h3', name: 'Heading 3', desc: 'Small section heading', icon: 'H3', action: 'h3' },
+    { id: 'ul', name: 'Bullet List', desc: 'Create a bulleted list', icon: '•', action: 'insertUnorderedList' },
+    { id: 'ol', name: 'Numbered List', desc: 'Create a numbered list', icon: '1.', action: 'insertOrderedList' },
+    { id: 'quote', name: 'Quote Block', desc: 'Capture a quote block', icon: '"', action: 'blockquote' },
+    { id: 'code', name: 'Code Block', desc: 'Monospaced code area', icon: '</>', action: 'pre' },
+    { id: 'divider', name: 'Divider', desc: 'Horizontal rule line', icon: '―', action: 'insertHorizontalRule' },
+    { id: 'today', name: "Today's Date", desc: 'Insert formatted date', icon: '📅', action: 'date' },
+    { id: 'todo', name: 'Todo Checklist', desc: 'Insert interactive checkbox', icon: '☑️', action: 'todo' }
+  ];
+
+  const checkSlashCommand = () => {
+    if (!editorRef.current) return;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const node = sel.anchorNode;
+    if (!node || node.nodeType !== 3) {
+      setSlashMenu({ show: false, query: '', selectedIndex: 0 });
+      return;
+    }
+
+    const text = node.textContent;
+    const offset = sel.anchorOffset;
+    const lastSlash = text.lastIndexOf('/', offset);
+
+    if (lastSlash !== -1 && (lastSlash === 0 || /\s/.test(text[lastSlash - 1]))) {
+      const query = text.substring(lastSlash + 1, offset);
+      if (!query.includes(' ')) {
+        setSlashMenu({ show: true, query: query.toLowerCase(), selectedIndex: 0 });
+        return;
+      }
+    }
+    setSlashMenu({ show: false, query: '', selectedIndex: 0 });
+  };
+
+  const executeSlashCommand = (cmd) => {
+    if (!editorRef.current) return;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const node = sel.anchorNode;
+    if (node && node.nodeType === 3) {
+      const text = node.textContent;
+      const offset = sel.anchorOffset;
+      const lastSlash = text.lastIndexOf('/', offset);
+      if (lastSlash !== -1) {
+        node.textContent = text.substring(0, lastSlash) + text.substring(offset);
+      }
+    }
+
+    setSlashMenu({ show: false, query: '', selectedIndex: 0 });
+
+    if (['h1', 'h2', 'h3', 'blockquote', 'pre'].includes(cmd.action)) {
+      document.execCommand('formatBlock', false, `<${cmd.action}>`);
+    } else if (cmd.action === 'insertUnorderedList' || cmd.action === 'insertOrderedList' || cmd.action === 'insertHorizontalRule') {
+      document.execCommand(cmd.action, false, null);
+    } else if (cmd.action === 'date') {
+      const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      document.execCommand('insertText', false, todayStr);
+    } else if (cmd.action === 'todo') {
+      document.execCommand('insertText', false, '- [ ] ');
+    }
+    handleEditorInput();
+  };
+
+  // Smart Auto-link on Paste
+  const handlePaste = (e) => {
+    const pasteText = e.clipboardData?.getData('text/plain');
+    if (!pasteText) return;
+
+    const isUrl = /^https?:\/\/[^\s]+$/i.test(pasteText.trim());
+    if (isUrl) {
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && editorRef.current?.contains(sel.anchorNode)) {
+        const selectedText = sel.toString();
+        if (selectedText.trim() && !/^https?:\/\//i.test(selectedText.trim())) {
+          e.preventDefault();
+          const a = document.createElement('a');
+          a.href = pasteText.trim();
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.textContent = selectedText;
+          a.style.color = 'var(--accent)';
+          a.style.textDecoration = 'underline';
+
+          const range = sel.getRangeAt(0);
+          range.deleteContents();
+          range.insertNode(a);
+
+          range.setStartAfter(a);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+
+          handleEditorInput();
+          return;
+        }
+      }
+    }
+  };
+
+  // Drag & Drop for Unified Attachment Block
+  const formatFileSize = (bytes) => {
+    if (!bytes) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  };
+
+  const handleDragEnter = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer?.types?.includes('Files')) {
+      setIsDraggingFile(true);
+    }
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    setIsDraggingFile(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFile(false);
+
+    if (!e.dataTransfer || !e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
+
+    const files = Array.from(e.dataTransfer.files);
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const dataUrl = evt.target.result;
+        insertAttachmentCard(file, dataUrl);
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+
+  const insertAttachmentCard = (file, dataUrl) => {
+    if (!editorRef.current) return;
+
+    const card = document.createElement('div');
+    card.className = 'unified-attachment-card';
+    card.setAttribute('contenteditable', 'false');
+
+    const isImage = file.type.startsWith('image/');
+    const isAudio = file.type.startsWith('audio/');
+
+    const iconStr = isImage ? '📷' : isAudio ? '🎵' : '📄';
+
+    let bodyHtml = '';
+    if (isImage) {
+      bodyHtml = `<img src="${dataUrl}" alt="${file.name}" class="unified-card-img" />`;
+    } else if (isAudio) {
+      bodyHtml = `<audio controls src="${dataUrl}" class="unified-card-audio"></audio>`;
+    } else {
+      bodyHtml = `<div class="unified-card-doc-preview"><span>📄 Document attached</span><a href="${dataUrl}" download="${file.name}" style="color: var(--accent); font-weight: 600;">Download ${file.name}</a></div>`;
+    }
+
+    card.innerHTML = `
+      <div class="unified-card-header">
+        <span class="unified-card-info">
+          <span class="unified-card-icon">${iconStr}</span>
+          <span class="unified-card-name">${file.name}</span>
+          <span class="unified-card-size">(${formatFileSize(file.size)})</span>
+        </span>
+        <div class="unified-card-actions">
+          <button type="button" class="delete-card-btn" title="Remove attachment">✕</button>
+        </div>
+      </div>
+      <div class="unified-card-body">
+        ${bodyHtml}
+      </div>
+    `;
+
+    // Attach remove handler
+    card.querySelector('.delete-card-btn')?.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      card.remove();
+      handleEditorInput();
+    });
+
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount && editorRef.current.contains(sel.anchorNode)) {
+      const range = sel.getRangeAt(0);
+      range.insertNode(card);
+      const p = document.createElement('p');
+      p.innerHTML = '<br>';
+      card.after(p);
+      range.setStartAfter(p);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } else {
+      editorRef.current.appendChild(card);
+      const p = document.createElement('p');
+      p.innerHTML = '<br>';
+      editorRef.current.appendChild(p);
+    }
+    handleEditorInput();
+  };
+
 
   const pushHistory = () => {
     if (!editorRef.current) return;
@@ -517,17 +807,44 @@ export default function Editor({
     }
   };
 
-  // Combined input handler: snippets + auto-detect
+  // Combined input handler: snippets + auto-detect + slash menu
   const handleInput = () => {
     handleEditorInput();
     checkForSnippets();
+    checkSlashCommand();
   };
 
-  // Combined keydown: shortcuts + markdown + auto-pair
+  // Combined keydown: shortcuts + markdown + auto-pair + slash menu nav
   const handleCombinedKeyDown = (e) => {
+    if (slashMenu.show) {
+      const filtered = SLASH_COMMANDS.filter(c => c.name.toLowerCase().includes(slashMenu.query) || c.id.toLowerCase().includes(slashMenu.query));
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSlashMenu(prev => ({ ...prev, selectedIndex: (prev.selectedIndex + 1) % (filtered.length || 1) }));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSlashMenu(prev => ({ ...prev, selectedIndex: (prev.selectedIndex - 1 + (filtered.length || 1)) % (filtered.length || 1) }));
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (filtered[slashMenu.selectedIndex]) {
+          executeSlashCommand(filtered[slashMenu.selectedIndex]);
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setSlashMenu({ show: false, query: '', selectedIndex: 0 });
+        return;
+      }
+    }
     handleKeyDownForPairs(e);
     handleEditorKeyDown(e);
   };
+
 
   // Tags
   const handleTagAdd = (e) => {
@@ -693,7 +1010,13 @@ export default function Editor({
           <button className="toolbar-btn" onMouseDown={toolbarMouseDown} onClick={() => handleFormat('insertOrderedList')} title="Numbered list">
             <ListOrdered size={16} />
           </button>
+          <div className="toolbar-divider" />
+          <button className="toolbar-btn" onMouseDown={toolbarMouseDown} onClick={() => fileInputRef.current?.click()} title="Attach file or image">
+            <Paperclip size={16} />
+          </button>
+          <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} style={{ display: 'none' }} />
         </div>
+
 
         <div className="toolbar-group">
           {/* Font size */}
@@ -750,8 +1073,89 @@ export default function Editor({
         </div>
       )}
 
-      {/* Paper */}
-      <div className="paper" onKeyDown={handleCombinedKeyDown} onKeyUp={handleKeyUp}>
+      {/* Paper Stack Container */}
+      <div className="paper-stack-container">
+        {/* Pointed Yellow Triangle Tabs Stacked Behind the Right Edge */}
+        {drafts.map((d, i) => {
+          const topOffset = 50 + i * 85;
+          const dTitle = typeof d === 'object' && d?.title ? d.title : `Draft #${i + 1}`;
+          return (
+            <div
+              key={i}
+              className="paper-triangular-flap"
+              onClick={() => openDraft(i)}
+              title={`Open ${dTitle}`}
+              style={{
+                top: `${topOffset}px`
+              }}
+            >
+              <div className="paper-triangular-label">
+                <Layers size={12} style={{ color: '#713F12', flexShrink: 0 }} />
+                <span>{dTitle}</span>
+              </div>
+            </div>
+          );
+        })}
+
+        <button
+          className="stacked-paper-add"
+          onClick={createNewDraft}
+          title="Add draft paper sheet behind page"
+        >
+          <Plus size={13} />
+          <span>+ Draft Sheet</span>
+        </button>
+
+        {/* Main Front Paper Card */}
+        <div
+          className={`paper ${isDraggingFile ? 'drop-active' : ''}`}
+          onKeyDown={handleCombinedKeyDown}
+          onKeyUp={handleKeyUp}
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          style={{ position: 'relative', zIndex: 10 }}
+        >
+          {/* Freehand Draft Canvas Overlay Modal */}
+          <DraftSheetCanvas
+            isOpen={isDraftOpen}
+            onClose={() => setIsDraftOpen(false)}
+            initialDataUrl={typeof drafts[activeDraftIndex] === 'object' ? drafts[activeDraftIndex]?.dataUrl || '' : (drafts[activeDraftIndex] || '')}
+            initialTitle={typeof drafts[activeDraftIndex] === 'object' ? drafts[activeDraftIndex]?.title || '' : `Draft #${(activeDraftIndex !== null ? activeDraftIndex : 0) + 1}`}
+            onSaveDraft={handleSaveDraft}
+            onDeleteDraft={handleDeleteDraft}
+            onInsertToEditor={handleInsertDraftToEditor}
+            sheetIndex={activeDraftIndex !== null ? activeDraftIndex : 0}
+          />
+
+
+        {isDraggingFile && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 100,
+              background: 'rgba(247, 245, 240, 0.92)',
+              border: '2px dashed var(--accent)',
+              borderRadius: 'var(--radius-lg)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '12px',
+              color: 'var(--accent)',
+              fontWeight: 600,
+              pointerEvents: 'none',
+              backdropFilter: 'blur(4px)'
+            }}
+          >
+            <div style={{ fontSize: '36px' }}>📥</div>
+            <div style={{ fontSize: '16px' }}>Drop files or images here to attach</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 400 }}>Supports images, audio, PDFs & documents</div>
+          </div>
+        )}
+
         <input
           type="text"
           className="paper-title"
@@ -800,15 +1204,40 @@ export default function Editor({
           </div>
         )}
 
-        <div
-          ref={editorRef}
-          className={`paper-body font-${fontSize}`}
-          contentEditable
-          onInput={handleInput}
-          onBlur={handleEditorInput}
-          data-placeholder={isNewEntry ? prompt : 'Start writing privately...'}
-          style={{ outline: 'none' }}
-        />
+        <div style={{ position: 'relative' }}>
+          <div
+            ref={editorRef}
+            className={`paper-body font-${fontSize}`}
+            contentEditable
+            onInput={handleInput}
+            onBlur={() => { handleEditorInput(); setTimeout(() => setSlashMenu({ show: false, query: '', selectedIndex: 0 }), 200); }}
+            onPaste={handlePaste}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            data-placeholder={isNewEntry ? prompt : 'Start writing privately... (type / for commands)'}
+            style={{ outline: 'none' }}
+          />
+
+          {slashMenu.show && (
+            <div className="slash-menu" style={{ top: '24px', left: '16px' }}>
+              {SLASH_COMMANDS.filter(c => c.name.toLowerCase().includes(slashMenu.query) || c.id.toLowerCase().includes(slashMenu.query)).map((cmd, idx) => (
+                <div
+                  key={cmd.id}
+                  className={`slash-menu-item ${idx === slashMenu.selectedIndex ? 'selected' : ''}`}
+                  onClick={() => executeSlashCommand(cmd)}
+                  onMouseDown={(ev) => ev.preventDefault()}
+                >
+                  <span className="slash-menu-icon" style={{ fontSize: '14px', width: '20px', textAlign: 'center' }}>{cmd.icon}</span>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{cmd.name}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{cmd.desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
 
         <div className="tags-container">
           <Tag size={14} style={{ color: 'var(--text-muted)' }} />
@@ -828,6 +1257,12 @@ export default function Editor({
           />
         </div>
       </div>
-    </main>
-  );
+    </div>
+  </main>
+);
 }
+
+
+
+
+

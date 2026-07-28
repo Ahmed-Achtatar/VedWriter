@@ -19,6 +19,7 @@ import Sidebar from './components/Sidebar';
 import Editor from './components/Editor';
 import CreateJournalModal from './components/CreateJournalModal';
 import ShareBackupModal from './components/ShareBackupModal';
+import QuickCaptureModal from './components/QuickCaptureModal';
 
 async function sha256(message) {
   const msgBuffer = new TextEncoder().encode(message);
@@ -62,7 +63,9 @@ export default function App() {
   // Modals
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showQuickCaptureModal, setShowQuickCaptureModal] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
 
   // Pinned entries
   const [pinnedEntries, setPinnedEntries] = useState([]);
@@ -336,7 +339,9 @@ export default function App() {
             const title = await decryptWithKey(e.encryptedTitle);
             const body = await decryptWithKey(e.encryptedBody);
             const tags = JSON.parse(await decryptWithKey(e.encryptedTags));
-            return { ...e, title, body, tags };
+            const drafts = e.encryptedDrafts ? JSON.parse(await decryptWithKey(e.encryptedDrafts)) : [];
+            return { ...e, title, body, tags, drafts };
+
           } catch { return null; }
         })
       );
@@ -400,17 +405,79 @@ export default function App() {
     } catch { showToast('Failed to add page.', 'error'); }
   };
 
+  // Quick Capture: Save note to 'temporary' journal
+  const handleSaveToTemporaryJournal = async (noteText) => {
+    try {
+      let tempJournal = journals.find(j => j.title && j.title.toLowerCase() === 'temporary');
+      if (!tempJournal) {
+        const jId = generateRandomString(12);
+        const encTitle = await encryptWithKey('temporary');
+        const newJ = { id: jId, encryptedTitle: encTitle, coverType: 'paper', dateCreated: Date.now() };
+        await saveJournal(newJ);
+        tempJournal = { ...newJ, title: 'temporary', entryCount: 0 };
+        setJournals(prev => [...prev, tempJournal]);
+      }
+
+      const eId = generateRandomString(16);
+      const now = new Date();
+      const title = `Quick Note — ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+      const body = `<p>${noteText.replace(/\n/g, '<br>')}</p>`;
+      const tags = ['quick-capture'];
+
+      const encTitle = await encryptWithKey(title);
+      const encBody = await encryptWithKey(body);
+      const encTags = await encryptWithKey(JSON.stringify(tags));
+
+      const newEntry = {
+        id: eId,
+        journalId: tempJournal.id,
+        encryptedTitle: encTitle,
+        encryptedBody: encBody,
+        encryptedTags: encTags,
+        dateCreated: Date.now(),
+        dateModified: Date.now(),
+        position: 0
+      };
+
+      await saveEntry(newEntry);
+      showToast('Saved to "temporary" journal!');
+      await loadJournals();
+
+      if (activeJournal && activeJournal.id === tempJournal.id) {
+        await loadEntries(tempJournal.id);
+      }
+    } catch (err) {
+      console.error('Quick capture failed:', err);
+      showToast('Failed to save quick note.', 'error');
+    }
+  };
+
+  // Global Alt+Space shortcut for Quick Capture
+  useEffect(() => {
+    const handleGlobalKeyDown = (e) => {
+      if (e.altKey && (e.code === 'Space' || e.key === ' ')) {
+        e.preventDefault();
+        setShowQuickCaptureModal(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
+
+
   // Save entry
   const handleSaveEntry = async (updatedEntry) => {
     try {
       const encTitle = await encryptWithKey(updatedEntry.title);
       const encBody = await encryptWithKey(updatedEntry.body);
       const encTags = await encryptWithKey(JSON.stringify(updatedEntry.tags));
+      const encDrafts = await encryptWithKey(JSON.stringify(updatedEntry.drafts || []));
       const savedEntry = {
         ...updatedEntry,
         encryptedTitle: encTitle,
         encryptedBody: encBody,
         encryptedTags: encTags,
+        encryptedDrafts: encDrafts,
         dateModified: Date.now()
       };
       await saveEntry(savedEntry);
@@ -418,6 +485,7 @@ export default function App() {
       setActiveEntry(savedEntry);
     } catch { /**/ }
   };
+
 
   // Delete entry
   const handleDeleteEntry = async (entryId) => {
@@ -668,7 +736,7 @@ export default function App() {
   if (!activeJournal) {
     return (
       <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-        <Header onBackup={() => setShowShareModal(true)} onLock={handleLock} />
+        <Header onBackup={() => setShowShareModal(true)} onLock={handleLock} onQuickCapture={() => setShowQuickCaptureModal(true)} />
         <main className="dashboard-container">
           <div className="page-header">
             <h2>My Journals</h2>
@@ -750,6 +818,7 @@ export default function App() {
 
         <CreateJournalModal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} onCreate={handleCreateJournal} />
         <ShareBackupModal isOpen={showShareModal} onClose={() => setShowShareModal(false)} onExportBackup={handleExportBackup} onImportBackup={handleImportBackup} />
+        <QuickCaptureModal isOpen={showQuickCaptureModal} onClose={() => setShowQuickCaptureModal(false)} onSaveToTemporary={handleSaveToTemporaryJournal} />
         {toast.message && <div className={`toast toast-${toast.type}`}>{toast.type === 'success' ? <CheckCircle2 size={16} /> : <ShieldAlert size={16} />}<span>{toast.message}</span></div>}
       </div>
     );
@@ -763,6 +832,7 @@ export default function App() {
         onBack={() => { setActiveJournal(null); setActiveEntry(null); loadJournals(); }}
         onBackup={() => setShowShareModal(true)} onDeleteJournal={requestDeleteJournal} onLock={handleLock}
         mobileMenuOpen={mobileSidebarOpen} onToggleMobileMenu={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+        onQuickCapture={() => setShowQuickCaptureModal(true)}
       />
       <div className="workspace-container">
         <Sidebar
@@ -780,6 +850,8 @@ export default function App() {
       </div>
       <ShareBackupModal isOpen={showShareModal} onClose={() => setShowShareModal(false)} entry={activeEntry}
         onExportBackup={handleExportBackup} onImportBackup={handleImportBackup} />
+      <QuickCaptureModal isOpen={showQuickCaptureModal} onClose={() => setShowQuickCaptureModal(false)} onSaveToTemporary={handleSaveToTemporaryJournal} />
+
 
       {/* Mobile FAB for new page */}
       <button className="mobile-fab" onClick={() => handleCreateEntry(null)} title="New page">
