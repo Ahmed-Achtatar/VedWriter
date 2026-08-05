@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { LogOut, ChevronLeft, Palette, Menu, X, Zap } from 'lucide-react';
+import { LogOut, ChevronLeft, Palette, Menu, PanelRightOpen, X, MessageCircle } from 'lucide-react';
 import { THEMES, loadTheme, setTheme } from '../theme';
 
 export default function Header({
@@ -12,7 +12,8 @@ export default function Header({
   mobileMenuOpen,
   onToggleMobileMenu,
   showBackup = true,
-  onQuickCapture
+  onToggleEdgeWidget,
+  onContactDeveloper
 }) {
   const [currentTheme, setCurrentTheme] = useState(loadTheme());
   const [menuOpen, setMenuOpen] = useState(false);
@@ -67,15 +68,15 @@ export default function Header({
           </button>
         )}
 
-        {onQuickCapture && (
+        {onToggleEdgeWidget && (
           <button
-            className="btn btn-secondary btn-sm"
-            onClick={onQuickCapture}
-            title="Quick Capture (Alt+Space)"
-            style={{ display: 'flex', alignItems: 'center', gap: '5px' }}
+            className="btn btn-secondary btn-sm header-edge-widget"
+            onClick={onToggleEdgeWidget}
+            title="Open side panel"
+            aria-label="Open side panel"
           >
-            <Zap size={14} style={{ color: 'var(--accent)' }} />
-            Quick Capture
+            <PanelRightOpen size={15} />
+            <span>Side panel</span>
           </button>
         )}
 
@@ -93,33 +94,47 @@ export default function Header({
           {menuOpen && (
             <div className="theme-menu">
               {Object.entries(THEMES).map(([id, theme]) => (
-                <div
+                <button
                   key={id}
                   className={`theme-option ${currentTheme === id ? 'active' : ''}`}
                   onClick={() => handleThemeChange(id)}
+                  type="button"
+                  aria-pressed={currentTheme === id}
                 >
                   <span className="theme-dot" style={{ background: theme.dot }} />
                   <span>{theme.name}</span>
-                </div>
+                </button>
               ))}
             </div>
           )}
         </div>
 
         {showBackup && onBackup && (
-          <button className="btn btn-secondary btn-sm" onClick={onBackup}>
+          <button className="btn btn-secondary btn-sm header-backup" onClick={onBackup} aria-label="Backup and restore">
             Backup / Restore
+          </button>
+        )}
+
+        {onContactDeveloper && (
+          <button
+            className="btn btn-secondary btn-sm header-contact-developer"
+            onClick={onContactDeveloper}
+            title="Contact developer"
+            aria-label="Contact developer"
+          >
+            <MessageCircle size={15} />
+            <span>Contact developer</span>
           </button>
         )}
 
 
         {variant === 'workspace' && onDeleteJournal && (
-          <button className="btn btn-danger btn-sm" onClick={onDeleteJournal} title="Delete this journal and all its pages">
+            <button className="btn btn-danger btn-sm header-delete" onClick={onDeleteJournal} title="Delete this journal and all its pages">
             Delete Journal
           </button>
         )}
 
-        <button className="btn btn-secondary btn-sm" onClick={onLock} title="Lock app">
+        <button className="btn btn-secondary btn-sm header-lock" onClick={onLock} title="Lock app" aria-label="Lock app">
           <LogOut size={16} />
           Lock
         </button>

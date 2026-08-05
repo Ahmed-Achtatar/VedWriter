@@ -1,12 +1,28 @@
 import React, { useState } from 'react';
-import { Plus, Search, Pin, PinOff, CheckSquare, Square, LayoutTemplate, Check, ChevronDown, ChevronRight, Book } from 'lucide-react';
+import { Plus, Search, Pin, PinOff, CheckSquare, Square, LayoutTemplate, Check, ChevronDown, ChevronRight, Book, StickyNote, GitBranch, Columns3, Image as ImageIcon, Pencil, Network } from 'lucide-react';
 
-const TEMPLATES = [
-  { id: null, name: 'Blank page' },
-  { id: 'daily', name: 'Daily reflection' },
-  { id: 'study', name: 'Study notes' },
-  { id: 'meeting', name: 'Meeting notes' }
+const PAGE_TEMPLATES = [
+  { id: null, name: 'Blank page', icon: 'file' },
+  { id: 'daily', name: 'Daily reflection', icon: 'sun' },
+  { id: 'study', name: 'Study notes', icon: 'book' },
+  { id: 'meeting', name: 'Meeting notes', icon: 'users' }
 ];
+
+const CANVAS_TEMPLATES = [
+  { id: 'sticky', name: 'Sticky Notes', desc: 'Brainstorm on a 2D board', icon: 'sticky' },
+  { id: 'mindmap', name: 'Mind Map', desc: 'Connected ideas & branches', icon: 'mindmap' },
+  { id: 'kanban', name: 'Kanban Board', desc: 'Columns of cards to organize', icon: 'kanban' },
+  { id: 'moodboard', name: 'Moodboard', desc: 'Visual collection of cards', icon: 'moodboard' },
+  { id: 'whiteboard', name: 'Whiteboard', desc: 'Freeform blank canvas', icon: 'whiteboard' }
+];
+
+const TEMPLATE_ICONS = {
+  sticky: StickyNote,
+  mindmap: GitBranch,
+  kanban: Columns3,
+  moodboard: ImageIcon,
+  whiteboard: Pencil
+};
 
 const isToday = (ts) => {
   if (!ts) return false;
@@ -110,9 +126,12 @@ export default function Sidebar({
 
   const renderItem = (entry, i) => {
     const isSelected = selectedIds.includes(entry.id);
+    const isCanvas = entry.entryType === 'canvas';
+    const canvasTpl = isCanvas ? entry.canvasTemplate : null;
+    const CanvasIcon = canvasTpl && TEMPLATE_ICONS[canvasTpl] ? TEMPLATE_ICONS[canvasTpl] : Network;
     return (
       <div key={entry.id}
-        className={`page-item ${activeEntry?.id === entry.id && !bulkMode ? 'active' : ''} ${isSelected ? 'selected' : ''} ${draggedIndex === i ? 'dragging' : ''}`}
+        className={`page-item ${activeEntry?.id === entry.id && !bulkMode ? 'active' : ''} ${isSelected ? 'selected' : ''} ${draggedIndex === i ? 'dragging' : ''} ${isCanvas ? 'is-canvas' : ''}`}
         draggable={!bulkMode}
         onDragStart={() => handleDragStart(i)}
         onDragOver={(e) => handleDragOver(e, i)}
@@ -120,10 +139,14 @@ export default function Sidebar({
         onClick={() => handleItemClick(entry)}
       >
         {isSelected && <div className="selected-badge" aria-hidden="true"><Check size={14} /></div>}
-        <Book size={16} className="page-item-icon" />
+        {isCanvas
+          ? <CanvasIcon size={16} className="page-item-icon" style={{ color: 'var(--accent)' }} />
+          : <Book size={16} className="page-item-icon" />
+        }
         <div className="page-item-content">
           <div className="page-item-header">
-            <span className="page-item-title">{entry.title || 'Untitled Page'}</span>
+            <span className="page-item-title">{entry.title || (isCanvas ? 'Untitled Canvas' : 'Untitled Page')}</span>
+            {isCanvas && <span className="canvas-badge" title={`Canvas · ${canvasTpl || 'whiteboard'}`}>{canvasTpl || 'canvas'}</span>}
             {!bulkMode && onTogglePin && (
               <button className="pin-btn" onClick={(e) => { e.stopPropagation(); onTogglePin(entry.id); }}
                 title={pinnedEntries.includes(entry.id) ? 'Unpin' : 'Pin'}>
@@ -183,13 +206,29 @@ export default function Sidebar({
                 <LayoutTemplate size={12} />
               </button>
               {showTemplateMenu && (
-                <div className="template-menu" onClick={() => setShowTemplateMenu(false)}>
-                  {TEMPLATES.map(t => (
-                    <button key={t.id || 'blank'} className="template-option"
-                      onClick={() => onCreateEntry(t.id)}>
-                      <span>{t.name}</span>
+                <div className="template-menu" onClick={() => setShowTemplateMenu(false)} style={{ minWidth: '240px' }}>
+                  <div className="template-section-label">Pages</div>
+                  {PAGE_TEMPLATES.map(t => (
+                    <button key={'p-' + (t.id || 'blank')} className="template-option"
+                      onClick={() => onCreateEntry({ entryType: 'page', templateId: t.id })}>
+                      <span className="template-option-name">{t.name}</span>
                     </button>
                   ))}
+                  <div className="template-divider" />
+                  <div className="template-section-label">Canvas</div>
+                  {CANVAS_TEMPLATES.map(t => {
+                    const Icon = TEMPLATE_ICONS[t.id];
+                    return (
+                      <button key={'c-' + t.id} className="template-option template-option-canvas"
+                        onClick={() => onCreateEntry({ entryType: 'canvas', canvasTemplate: t.id })}>
+                        <Icon size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '1px' }}>
+                          <span className="template-option-name">{t.name}</span>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t.desc}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -219,9 +258,11 @@ export default function Sidebar({
           <div className="empty-sidebar">
             <p style={{ fontSize: '13px', marginBottom: '4px' }}>No pages yet.</p>
             <p style={{ fontSize: '12px' }}>
-              <span className="empty-prompt" onClick={() => onCreateEntry('daily')}>Daily reflection</span>
-              <span className="empty-prompt" onClick={() => onCreateEntry('study')}>Study notes</span>
-              <span className="empty-prompt" onClick={() => onCreateEntry(null)}>Blank page</span>
+              <span className="empty-prompt" onClick={() => onCreateEntry({ entryType: 'page', templateId: 'daily' })}>Daily</span>
+              <span className="empty-prompt" onClick={() => onCreateEntry({ entryType: 'page', templateId: 'study' })}>Study</span>
+              <span className="empty-prompt" onClick={() => onCreateEntry({ entryType: 'page', templateId: null })}>Blank</span>
+              <span className="empty-prompt" onClick={() => onCreateEntry({ entryType: 'canvas', canvasTemplate: 'sticky' })}>Sticky</span>
+              <span className="empty-prompt" onClick={() => onCreateEntry({ entryType: 'canvas', canvasTemplate: 'mindmap' })}>Mind Map</span>
             </p>
           </div>
         ) : (

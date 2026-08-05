@@ -34,6 +34,8 @@ export default function DraftSheetCanvas({
   const [isEraser, setIsEraser] = useState(false);
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const historyIndexRef = useRef(-1);
+  const saveStateRef = useRef(null);
   const [title, setTitle] = useState(initialTitle || `Draft #${sheetIndex + 1}`);
 
   useEffect(() => {
@@ -76,11 +78,11 @@ export default function DraftSheetCanvas({
       const img = new Image();
       img.onload = () => {
         ctx.drawImage(img, 0, 0, rect.width, rect.height);
-        saveState();
+        saveStateRef.current?.();
       };
       img.src = initialDataUrl;
     } else {
-      saveState();
+      saveStateRef.current?.();
     }
   }, [isOpen, initialDataUrl]);
 
@@ -88,13 +90,17 @@ export default function DraftSheetCanvas({
     const canvas = canvasRef.current;
     if (!canvas) return;
     const dataUrl = canvas.toDataURL();
+    const currentIndex = historyIndexRef.current;
     setHistory((prev) => {
-      const next = prev.slice(0, historyIndex + 1);
+      const next = prev.slice(0, currentIndex + 1);
       next.push(dataUrl);
       return next;
     });
-    setHistoryIndex((prev) => prev + 1);
+    const nextIndex = currentIndex + 1;
+    historyIndexRef.current = nextIndex;
+    setHistoryIndex(nextIndex);
   };
+  saveStateRef.current = saveState;
 
   const autoSave = () => {
     const canvas = canvasRef.current;
@@ -154,6 +160,7 @@ export default function DraftSheetCanvas({
     if (historyIndex > 0) {
       const targetIdx = historyIndex - 1;
       restoreState(history[targetIdx]);
+      historyIndexRef.current = targetIdx;
       setHistoryIndex(targetIdx);
     }
   };
@@ -162,6 +169,7 @@ export default function DraftSheetCanvas({
     if (historyIndex < history.length - 1) {
       const targetIdx = historyIndex + 1;
       restoreState(history[targetIdx]);
+      historyIndexRef.current = targetIdx;
       setHistoryIndex(targetIdx);
     }
   };

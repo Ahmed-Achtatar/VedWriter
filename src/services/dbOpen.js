@@ -1,7 +1,30 @@
 const DB_NAME = 'VedWriterDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbInstance = null;
+
+function scrubLegacyRuntimeFields(db) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['journals', 'entries'], 'readwrite');
+    const scrub = (store, fields) => {
+      const cursorRequest = store.openCursor();
+      cursorRequest.onerror = () => reject(cursorRequest.error || new Error('Could not migrate stored records'));
+      cursorRequest.onsuccess = () => {
+        const cursor = cursorRequest.result;
+        if (!cursor) return;
+        const value = cursor.value;
+        fields.forEach((field) => { delete value[field]; });
+        cursor.update(value);
+        cursor.continue();
+      };
+    };
+    scrub(transaction.objectStore('journals'), ['title', 'entryCount']);
+    scrub(transaction.objectStore('entries'), ['title', 'body', 'tags', 'drafts']);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error('Could not migrate stored records'));
+    transaction.onabort = () => reject(transaction.error || new Error('Record migration aborted'));
+  });
+}
 
 export function openDatabase() {
   if (dbInstance) {
@@ -16,8 +39,16 @@ export function openDatabase() {
     };
 
     request.onsuccess = (event) => {
-      dbInstance = event.target.result;
-      resolve(dbInstance);
+      const openedDb = event.target.result;
+      dbInstance = openedDb;
+      openedDb.onversionchange = () => {
+        openedDb.close();
+        if (dbInstance === openedDb) dbInstance = null;
+      };
+      openedDb.onclose = () => {
+        if (dbInstance === openedDb) dbInstance = null;
+      };
+      scrubLegacyRuntimeFields(openedDb).then(() => resolve(openedDb), reject);
     };
 
     request.onupgradeneeded = (event) => {
@@ -38,6 +69,7 @@ export function openDatabase() {
       if (!db.objectStoreNames.contains('settings')) {
         db.createObjectStore('settings', { keyPath: 'key' });
       }
+
     };
   });
 }

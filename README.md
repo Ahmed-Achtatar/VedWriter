@@ -37,7 +37,7 @@ Run the native desktop shell with `npm run tauri:dev`. Build the web app with `n
 
 ## Security at a glance
 
-The current implementation derives an AES-GCM-256 key from the master password with PBKDF2-SHA-256 and 100,000 iterations, then stores encrypted records locally. See [SECURITY.md](SECURITY.md) for scope and limitations.
+The current implementation derives an AES-GCM-256 key from the master password with PBKDF2-SHA-256 and 600,000 iterations, then stores ciphertext-only records locally. See [SECURITY.md](SECURITY.md) for scope and limitations.
 
 VedWriter cannot recover a forgotten password. Losing the password or an exported backup can mean losing access to the data.
 

@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Lock, Unlock, Plus, KeyRound, ShieldAlert, RefreshCw, CheckCircle2, AlertTriangle, Search } from 'lucide-react';
 
 import {
-  getSetting, setSetting, saveJournal, getAllJournals,
-  deleteJournal, saveEntry, getEntriesForJournal, deleteEntry,
+  getSetting, setSettings, saveJournal, getAllJournals,
+  deleteJournal, saveEntry, getEntriesForJournal, deleteEntries,
   clearAllData, bulkImport, exportAllData
 } from './services/db';
 
@@ -17,9 +17,13 @@ import Header from './components/Header';
 import JournalCard from './components/JournalCard';
 import Sidebar from './components/Sidebar';
 import Editor from './components/Editor';
+import CanvasEntry, { CanvasErrorBoundary } from './components/canvas/CanvasEntry';
+import { createStarterBody } from './components/canvas/canvasUtils';
 import CreateJournalModal from './components/CreateJournalModal';
 import ShareBackupModal from './components/ShareBackupModal';
-import QuickCaptureModal from './components/QuickCaptureModal';
+import ContactDeveloperModal from './components/ContactDeveloperModal';
+import EdgeWidget from './components/EdgeWidget';
+import { sanitizeHtml } from './utils/sanitizeHtml';
 
 async function sha256(message) {
   const msgBuffer = new TextEncoder().encode(message);
@@ -30,6 +34,23 @@ async function sha256(message) {
 
 const AUTO_LOCK_MINUTES = 15;
 const AUTO_LOCK_CHECK_MS = 60000;
+const EDGE_WIDGET_MODE_KEY = 'vedwriter.edge-widget.enabled';
+
+function setEdgeWidgetPreference(enabled) {
+  try {
+    localStorage.setItem(EDGE_WIDGET_MODE_KEY, String(enabled));
+  } catch {
+    // Storage can be unavailable in a restricted webview.
+  }
+}
+
+function shouldOpenEdgeWidget() {
+  try {
+    return localStorage.getItem(EDGE_WIDGET_MODE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
 
 export default function App() {
   useEffect(() => { initTheme(); }, []);
@@ -48,6 +69,39 @@ export default function App() {
   // UI
   const [shake, setShake] = useState(false);
   const [toast, setToast] = useState({ message: '', type: '' });
+  const [edgeWidgetMode, setEdgeWidgetMode] = useState(false);
+  const [showSidePanelHint, setShowSidePanelHint] = useState(false);
+
+  const openEdgeWidget = () => {
+    setEdgeWidgetPreference(true);
+    setShowSidePanelHint(true);
+    setEdgeWidgetMode(true);
+  };
+
+  const closeEdgeWidget = () => {
+    setEdgeWidgetPreference(false);
+    setShowSidePanelHint(false);
+    setEdgeWidgetMode(false);
+  };
+
+  // Once the user enables the dock, bring it back automatically after unlock.
+  useEffect(() => {
+    if (!loading && !isLocked && shouldOpenEdgeWidget()) setEdgeWidgetMode(true);
+  }, [isLocked, loading]);
+
+  // Alt+Shift+W toggles the Side panel even when its collapsed hit area is
+  // visually quiet.
+  useEffect(() => {
+    const handleEdgeWidgetShortcut = (event) => {
+      if (event.altKey && event.shiftKey && event.code === 'KeyW') {
+        event.preventDefault();
+        if (edgeWidgetMode) closeEdgeWidget();
+        else openEdgeWidget();
+      }
+    };
+    window.addEventListener('keydown', handleEdgeWidgetShortcut);
+    return () => window.removeEventListener('keydown', handleEdgeWidgetShortcut);
+  }, [edgeWidgetMode]);
 
   // Dashboard
   const [journals, setJournals] = useState([]);
@@ -55,6 +109,13 @@ export default function App() {
   const [entries, setEntries] = useState([]);
   const [activeEntry, setActiveEntry] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const saveQueuesRef = React.useRef(new Map());
+  const saveRevisionRef = React.useRef(new Map());
+  const deletedEntryIdsRef = React.useRef(new Set());
+  const deletedJournalIdsRef = React.useRef(new Set());
+  const activeJournalIdRef = React.useRef(null);
+  const loadEntriesRequestRef = React.useRef(0);
+  const loadJournalsRequestRef = React.useRef(0);
 
   // Dashboard search and sort
   const [dashboardSearch, setDashboardSearch] = useState('');
@@ -63,7 +124,7 @@ export default function App() {
   // Modals
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
-  const [showQuickCaptureModal, setShowQuickCaptureModal] = useState(false);
+  const [showContactDeveloperModal, setShowContactDeveloperModal] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
 
@@ -127,6 +188,7 @@ export default function App() {
       if (e.key === 'Escape') {
         if (showCreateModal) setShowCreateModal(false);
         if (showShareModal) setShowShareModal(false);
+        if (showContactDeveloperModal) setShowContactDeveloperModal(false);
         return;
       }
       // Ctrl+K for search (only on dashboard)
@@ -144,7 +206,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleGlobalKeys);
     return () => window.removeEventListener('keydown', handleGlobalKeys);
-  }, [showCreateModal, showShareModal, activeJournal]);
+  }, [showContactDeveloperModal, showCreateModal, showShareModal, activeJournal]);
 
   // Toast
   const showToast = (message, type = 'success') => {
@@ -173,10 +235,7 @@ export default function App() {
       const encryptedVerifier = await encryptText(randomVerifierToken, password, generatedSalt, newIterations);
       const hash = await sha256(randomVerifierToken);
 
-      await setSetting('salt', generatedSalt);
-      await setSetting('verifier', encryptedVerifier);
-      await setSetting('verifier_hash', hash);
-      await setSetting('iterations', newIterations);
+      await setSettings({ salt: generatedSalt, verifier: encryptedVerifier, verifier_hash: hash, iterations: newIterations });
 
       setSalt(generatedSalt);
       setVerifier(encryptedVerifier);
@@ -221,9 +280,7 @@ export default function App() {
             const newEncryptedVerifier = await encryptText(randomVerifierToken, password, salt, newIterations);
             const hash = await sha256(randomVerifierToken);
 
-            await setSetting('verifier', newEncryptedVerifier);
-            await setSetting('verifier_hash', hash);
-            await setSetting('iterations', newIterations);
+            await setSettings({ verifier: newEncryptedVerifier, verifier_hash: hash, iterations: newIterations });
 
             // Re-encrypt all journals and entries
             const rawJournals = await getAllJournals();
@@ -280,6 +337,10 @@ export default function App() {
   // 3. Lock
   const handleLock = () => {
     clearKey(); // clear cached crypto key
+    setEdgeWidgetMode(false);
+    activeJournalIdRef.current = null;
+    loadEntriesRequestRef.current += 1;
+    loadJournalsRequestRef.current += 1;
     setIsLocked(true);
     setPassword(''); setConfirmPassword('');
     setJournals([]); setActiveJournal(null); setEntries([]); setActiveEntry(null);
@@ -292,6 +353,7 @@ export default function App() {
   const [entriesLoading, setEntriesLoading] = useState(false);
 
   const loadJournals = async () => {
+    const requestId = ++loadJournalsRequestRef.current;
     setJournalsLoading(true);
     try {
       const raw = await getAllJournals();
@@ -305,9 +367,11 @@ export default function App() {
           } catch { return null; }
         })
       );
-      setJournals(decrypted.filter(Boolean));
+      if (requestId === loadJournalsRequestRef.current) setJournals(decrypted.filter(Boolean));
     } catch { showToast('Failed to load journals.', 'error'); }
-    finally { setJournalsLoading(false); }
+    finally {
+      if (requestId === loadJournalsRequestRef.current) setJournalsLoading(false);
+    }
   };
 
   // Create journal
@@ -323,12 +387,14 @@ export default function App() {
 
   // Select journal
   const handleSelectJournal = async (journal) => {
+    activeJournalIdRef.current = journal.id;
     setActiveJournal(journal); setEntries([]); setActiveEntry(null);
     await loadEntries(journal.id);
   };
 
   // Load entries (parallel decryption with cached key)
   const loadEntries = async (journalId) => {
+    const requestId = ++loadEntriesRequestRef.current;
     setEntriesLoading(true);
     try {
       const raw = await getEntriesForJournal(journalId);
@@ -340,7 +406,7 @@ export default function App() {
             const body = await decryptWithKey(e.encryptedBody);
             const tags = JSON.parse(await decryptWithKey(e.encryptedTags));
             const drafts = e.encryptedDrafts ? JSON.parse(await decryptWithKey(e.encryptedDrafts)) : [];
-            return { ...e, title, body, tags, drafts };
+            return { ...e, title, body, tags, drafts, entryType: e.entryType || 'page', canvasTemplate: e.canvasTemplate || null };
 
           } catch { return null; }
         })
@@ -352,37 +418,111 @@ export default function App() {
         }
         return b.dateCreated - a.dateCreated;
       });
-      setEntries(valid);
+      if (requestId === loadEntriesRequestRef.current && activeJournalIdRef.current === journalId) {
+        setEntries(valid);
+      }
     } catch { showToast('Failed to load entries.', 'error'); }
-    finally { setEntriesLoading(false); }
+    finally {
+      if (requestId === loadEntriesRequestRef.current) setEntriesLoading(false);
+    }
   };
 
+  // Decrypted page data for the Side panel's target selector and continuation preview.
+  const loadWidgetEntries = React.useCallback(async (journalId) => {
+    const rawEntries = (await getEntriesForJournal(journalId))
+      .filter((entry) => entry.entryType !== 'canvas');
+    const summaries = await Promise.all(rawEntries.map(async (entry) => {
+      try {
+        return {
+          id: entry.id,
+          title: await decryptWithKey(entry.encryptedTitle),
+          body: await decryptWithKey(entry.encryptedBody),
+          dateModified: entry.dateModified || entry.dateCreated,
+          position: entry.position,
+          entryType: entry.entryType || 'page'
+        };
+      } catch {
+        return null;
+      }
+    }));
+
+    return summaries.filter(Boolean).sort((a, b) => {
+      if (a.position !== undefined && b.position !== undefined) return a.position - b.position;
+      return (b.dateModified || 0) - (a.dateModified || 0);
+    });
+  }, []);
+
   // Create entry
-  const handleCreateEntry = async (templateId) => {
+  const handleCreateEntry = async (payload) => {
     if (!activeJournal) return;
     try {
       const id = generateRandomString(16);
       let entryTitle = 'Untitled Page';
       let entryBody = '';
-      const entryTags = [];
+      let entryTags = [];
+      let entryType = 'page';
+      let canvasTemplate = null;
 
-      if (templateId) {
-        const now = new Date();
-        switch (templateId) {
-          case 'daily':
-            entryTitle = `Reflection — ${now.toLocaleDateString()}`;
-            entryBody = '<h2>Today I learned</h2><p></p><h2>Challenges</h2><p></p><h2>Tomorrow</h2><p></p>';
-            break;
-          case 'study':
-            entryTitle = 'Study Notes';
-            entryBody = '<h2>Topic</h2><p></p><h2>Key Points</h2><ul><li></li><li></li></ul><h2>Summary</h2><p></p>';
-            break;
-          case 'meeting':
-            entryTitle = `Meeting — ${now.toLocaleDateString()}`;
-            entryBody = '<h2>Attendees</h2><p></p><h2>Agenda</h2><ul><li></li></ul><h2>Action Items</h2><ul><li></li></ul>';
-            break;
-          default: break;
+      if (payload && typeof payload === 'object') {
+        entryType = payload.entryType || 'page';
+        if (entryType === 'canvas') {
+          canvasTemplate = payload.canvasTemplate || 'sticky';
+        } else {
+          if (payload.title) entryTitle = payload.title;
+          if (payload.body) entryBody = payload.body;
+          if (Array.isArray(payload.tags)) entryTags = payload.tags;
+          const templateId = payload.templateId;
+          if (templateId && !payload.title && !payload.body) {
+            const now = new Date();
+            switch (templateId) {
+              case 'daily':
+                entryTitle = `Reflection — ${now.toLocaleDateString()}`;
+                entryBody = '<h2>Today I learned</h2><p></p><h2>Challenges</h2><p></p><h2>Tomorrow</h2><p></p>';
+                break;
+              case 'study':
+                entryTitle = 'Study Notes';
+                entryBody = '<h2>Topic</h2><p></p><h2>Key Points</h2><ul><li></li><li></li></ul><h2>Summary</h2><p></p>';
+                break;
+              case 'meeting':
+                entryTitle = `Meeting — ${now.toLocaleDateString()}`;
+                entryBody = '<h2>Attendees</h2><p></p><h2>Agenda</h2><ul><li></li></ul><h2>Action Items</h2><ul><li></li></ul>';
+                break;
+              default: break;
+            }
+          }
         }
+      } else if (typeof payload === 'string' || payload === null) {
+        const templateId = payload;
+        if (templateId) {
+          const now = new Date();
+          switch (templateId) {
+            case 'daily':
+              entryTitle = `Reflection — ${now.toLocaleDateString()}`;
+              entryBody = '<h2>Today I learned</h2><p></p><h2>Challenges</h2><p></p><h2>Tomorrow</h2><p></p>';
+              break;
+            case 'study':
+              entryTitle = 'Study Notes';
+              entryBody = '<h2>Topic</h2><p></p><h2>Key Points</h2><ul><li></li><li></li></ul><h2>Summary</h2><p></p>';
+              break;
+            case 'meeting':
+              entryTitle = `Meeting — ${now.toLocaleDateString()}`;
+              entryBody = '<h2>Attendees</h2><p></p><h2>Agenda</h2><ul><li></li></ul><h2>Action Items</h2><ul><li></li></ul>';
+              break;
+            default: break;
+          }
+        }
+      }
+
+      if (entryType === 'canvas') {
+        const titles = {
+          sticky: 'Sticky Notes',
+          mindmap: 'Mind Map',
+          kanban: 'Kanban Board',
+          moodboard: 'Moodboard',
+          whiteboard: 'Whiteboard'
+        };
+        entryTitle = titles[canvasTemplate] || 'Canvas';
+        entryBody = createStarterBody(canvasTemplate);
       }
 
       const encTitle = await encryptWithKey(entryTitle);
@@ -391,6 +531,7 @@ export default function App() {
 
       const newEntry = {
         id, journalId: activeJournal.id,
+        entryType, canvasTemplate,
         encryptedTitle: encTitle, encryptedBody: encBody, encryptedTags: encTags,
         dateCreated: Date.now(), dateModified: Date.now(),
         position: entries.length
@@ -399,105 +540,187 @@ export default function App() {
       const dec = { ...newEntry, title: entryTitle, body: entryBody, tags: entryTags };
       setEntries([dec, ...entries]);
       setActiveEntry(dec);
-      showToast('New page added.');
+      showToast(entryType === 'canvas' ? 'New canvas added.' : 'New page added.');
       setJournals(journals.map(j => j.id === activeJournal.id ? { ...j, entryCount: j.entryCount + 1 } : j));
       setActiveJournal(prev => prev ? { ...prev, entryCount: prev.entryCount + 1 } : null);
     } catch { showToast('Failed to add page.', 'error'); }
   };
 
-  // Quick Capture: Save note to 'temporary' journal
-  const handleSaveToTemporaryJournal = async (noteText) => {
-    try {
-      let tempJournal = journals.find(j => j.title && j.title.toLowerCase() === 'temporary');
-      if (!tempJournal) {
-        const jId = generateRandomString(12);
-        const encTitle = await encryptWithKey('temporary');
-        const newJ = { id: jId, encryptedTitle: encTitle, coverType: 'paper', dateCreated: Date.now() };
-        await saveJournal(newJ);
-        tempJournal = { ...newJ, title: 'temporary', entryCount: 0 };
-        setJournals(prev => [...prev, tempJournal]);
-      }
+  // Side panel page save: replace a chosen page or create a new page in the
+  // chosen journal. The write still goes through the same encrypted database.
+  const handleSaveWidgetNote = async ({ journalId, entryId, title, content }) => {
+    if (!journalId) throw new Error('Choose a journal first.');
 
-      const eId = generateRandomString(16);
-      const now = new Date();
-      const title = `Quick Note — ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-      const body = `<p>${noteText.replace(/\n/g, '<br>')}</p>`;
-      const tags = ['quick-capture'];
+    const rawEntries = await getEntriesForJournal(journalId);
+    const safeContent = sanitizeHtml(content || '');
+    const hasContent = safeContent
+      .replace(/<br\s*\/?\s*>/gi, '')
+      .replace(/<[^>]*>/g, '')
+      .replace(/&nbsp;/gi, ' ')
+      .trim()
+      .length > 0;
+    const targetEntry = entryId ? rawEntries.find((entry) => entry.id === entryId) : null;
+    const targetJournal = journals.find((journal) => journal.id === journalId);
 
-      const encTitle = await encryptWithKey(title);
-      const encBody = await encryptWithKey(body);
-      const encTags = await encryptWithKey(JSON.stringify(tags));
+    if (entryId && !targetEntry) throw new Error('That page is no longer available.');
+    if (targetEntry?.entryType === 'canvas') {
+      throw new Error('Canvas pages cannot be edited in the Side panel.');
+    }
+    if (!targetEntry && !hasContent) throw new Error('Write something before creating a page.');
 
-      const newEntry = {
-        id: eId,
-        journalId: tempJournal.id,
-        encryptedTitle: encTitle,
-        encryptedBody: encBody,
-        encryptedTags: encTags,
-        dateCreated: Date.now(),
-        dateModified: Date.now(),
-        position: 0
+    if (targetEntry) {
+      const updatedBody = safeContent;
+      const currentTitle = await decryptWithKey(targetEntry.encryptedTitle);
+      const updatedTitle = String(title || '').trim() || currentTitle || 'Untitled page';
+      const updatedEntry = {
+        ...targetEntry,
+        encryptedTitle: await encryptWithKey(updatedTitle),
+        encryptedBody: await encryptWithKey(updatedBody),
+        dateModified: Date.now()
       };
 
-      await saveEntry(newEntry);
-      showToast('Saved to "temporary" journal!');
-      await loadJournals();
+      await saveEntry(updatedEntry);
 
-      if (activeJournal && activeJournal.id === tempJournal.id) {
-        await loadEntries(tempJournal.id);
+      if (activeJournal?.id === journalId) {
+        setEntries((previous) => previous.map((entry) => entry.id === entryId
+          ? { ...entry, title: updatedTitle, body: updatedBody, encryptedTitle: updatedEntry.encryptedTitle, encryptedBody: updatedEntry.encryptedBody, dateModified: updatedEntry.dateModified }
+          : entry));
+        setActiveEntry((previous) => previous?.id === entryId
+          ? { ...previous, title: updatedTitle, body: updatedBody, encryptedTitle: updatedEntry.encryptedTitle, encryptedBody: updatedEntry.encryptedBody, dateModified: updatedEntry.dateModified }
+          : previous);
       }
-    } catch (err) {
-      console.error('Quick capture failed:', err);
-      showToast('Failed to save quick note.', 'error');
+      return { entryId: targetEntry.id, title: updatedTitle, body: updatedBody };
     }
+
+    const now = Date.now();
+    const entryTitle = String(title || '').trim()
+      || `New Page - ${new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    const body = safeContent;
+    const newEntry = {
+      id: generateRandomString(16),
+      journalId,
+      entryType: 'page',
+      encryptedTitle: await encryptWithKey(entryTitle),
+      encryptedBody: await encryptWithKey(body),
+      encryptedTags: await encryptWithKey(JSON.stringify([])),
+      dateCreated: now,
+      dateModified: now,
+      position: rawEntries.length
+    };
+
+    await saveEntry(newEntry);
+    setJournals((previous) => previous.map((journal) => journal.id === journalId
+      ? { ...journal, entryCount: (journal.entryCount || 0) + 1, dateModified: now }
+      : journal));
+
+    if (activeJournal?.id === journalId) {
+      const runtimeEntry = {
+        ...newEntry,
+        title: entryTitle,
+        body,
+        tags: [],
+        drafts: []
+      };
+      setEntries((previous) => [runtimeEntry, ...previous]);
+      setActiveEntry(runtimeEntry);
+    }
+
+    if (targetJournal) await loadJournals();
+    return {
+      entryId: newEntry.id,
+      title: entryTitle,
+      body,
+      entry: { ...newEntry, title: entryTitle, body, tags: [], drafts: [] }
+    };
   };
 
-  // Global Alt+Space shortcut for Quick Capture
-  useEffect(() => {
-    const handleGlobalKeyDown = (e) => {
-      if (e.altKey && (e.code === 'Space' || e.key === ' ')) {
-        e.preventDefault();
-        setShowQuickCaptureModal(prev => !prev);
-      }
-    };
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, []);
-
-
   // Save entry
-  const handleSaveEntry = async (updatedEntry) => {
-    try {
-      const encTitle = await encryptWithKey(updatedEntry.title);
-      const encBody = await encryptWithKey(updatedEntry.body);
-      const encTags = await encryptWithKey(JSON.stringify(updatedEntry.tags));
-      const encDrafts = await encryptWithKey(JSON.stringify(updatedEntry.drafts || []));
+  const handleSaveEntry = (updatedEntry) => {
+    if (!updatedEntry?.id) return Promise.resolve();
+    const entryId = updatedEntry.id;
+    if (deletedEntryIdsRef.current.has(entryId) || deletedJournalIdsRef.current.has(updatedEntry.journalId)) {
+      return Promise.reject(new Error('This entry is being deleted.'));
+    }
+    const revision = (saveRevisionRef.current.get(entryId) || 0) + 1;
+    saveRevisionRef.current.set(entryId, revision);
+    const previous = saveQueuesRef.current.get(entryId) || Promise.resolve();
+    const saveTask = previous.catch(() => {}).then(async () => {
+      if (deletedEntryIdsRef.current.has(entryId) || deletedJournalIdsRef.current.has(updatedEntry.journalId)) {
+        throw new Error('This entry is being deleted.');
+      }
+      const encTitle = await encryptWithKey(updatedEntry.title || '');
+      const encBody = await encryptWithKey(updatedEntry.body || '');
+      const encTags = await encryptWithKey(JSON.stringify(Array.isArray(updatedEntry.tags) ? updatedEntry.tags : []));
+      const encDrafts = await encryptWithKey(JSON.stringify(Array.isArray(updatedEntry.drafts) ? updatedEntry.drafts : []));
       const savedEntry = {
         ...updatedEntry,
         encryptedTitle: encTitle,
         encryptedBody: encBody,
         encryptedTags: encTags,
         encryptedDrafts: encDrafts,
-        dateModified: Date.now()
+        dateModified: Date.now(),
       };
       await saveEntry(savedEntry);
-      setEntries(prev => prev.map(e => e.id === updatedEntry.id ? savedEntry : e));
-      setActiveEntry(savedEntry);
-    } catch { /**/ }
+      // Older saves may finish after a newer edit. They remain persisted in
+      // order, but must never push stale state back into the live workspace.
+      if (saveRevisionRef.current.get(entryId) === revision && !deletedEntryIdsRef.current.has(entryId)) {
+        setEntries((prev) => prev.map((entry) => entry.id === entryId ? savedEntry : entry));
+        setActiveEntry((current) => current?.id === entryId ? savedEntry : current);
+      }
+      return savedEntry;
+    });
+    saveQueuesRef.current.set(entryId, saveTask);
+    saveTask.then(() => {
+      if (saveQueuesRef.current.get(entryId) === saveTask) saveQueuesRef.current.delete(entryId);
+    }, () => {
+      if (saveQueuesRef.current.get(entryId) === saveTask) saveQueuesRef.current.delete(entryId);
+    });
+    saveTask.catch((error) => {
+      if (!deletedEntryIdsRef.current.has(entryId) && !deletedJournalIdsRef.current.has(updatedEntry.journalId)) {
+        console.error('Failed to save entry:', error);
+        showToast('Changes could not be saved.', 'error');
+      }
+    });
+    return saveTask;
+  };
+
+  const handleCreatePageFromCanvas = async ({ title, body, tags }) => {
+    await handleCreateEntry({ entryType: 'page', title, body, tags });
+  };
+
+  const handleOpenEntryFromCanvas = (entryId) => {
+    const target = entries.find((item) => item.id === entryId);
+    if (target) setActiveEntry(target);
+  };
+
+  const invalidateEntrySaves = async (entryId) => {
+    const pending = saveQueuesRef.current.get(entryId);
+    deletedEntryIdsRef.current.add(entryId);
+    saveRevisionRef.current.set(entryId, (saveRevisionRef.current.get(entryId) || 0) + 1);
+    if (pending) await pending.catch(() => {});
+  };
+
+  const invalidateAllSaves = async () => {
+    const pendingIds = [...saveQueuesRef.current.keys()];
+    await Promise.all(pendingIds.map((entryId) => invalidateEntrySaves(entryId)));
   };
 
 
   // Delete entry
   const handleDeleteEntry = async (entryId) => {
     if (!window.confirm('Delete this page? This cannot be undone.')) return;
+    await invalidateEntrySaves(entryId);
     try {
-      await deleteEntry(entryId);
+      await deleteEntries([entryId]);
       setEntries(prev => prev.filter(e => e.id !== entryId));
       setActiveEntry(null);
       showToast('Page deleted.');
       setJournals(prev => prev.map(j => j.id === activeJournal.id ? { ...j, entryCount: Math.max(0, j.entryCount - 1) } : j));
       setActiveJournal(prev => prev ? { ...prev, entryCount: Math.max(0, prev.entryCount - 1) } : null);
-    } catch { showToast('Failed to delete page.', 'error'); }
+    } catch {
+      deletedEntryIdsRef.current.delete(entryId);
+      showToast('Failed to delete page.', 'error');
+    }
   };
 
   // Delete journal (with typing confirmation)
@@ -516,13 +739,23 @@ export default function App() {
       showToast('Journal name doesn\'t match.', 'error');
       return;
     }
+    const journalId = activeJournal.id;
+    let journalEntries = [];
     try {
-      await deleteJournal(activeJournal.id);
+      journalEntries = await getEntriesForJournal(journalId);
+      deletedJournalIdsRef.current.add(journalId);
+      await Promise.all(journalEntries.map((entry) => invalidateEntrySaves(entry.id)));
+      await deleteJournal(journalId);
       showToast(`"${activeJournal.title}" deleted.`);
+      activeJournalIdRef.current = null;
       setActiveJournal(null); setActiveEntry(null);
       setShowDeleteJournal(false);
       await loadJournals();
-    } catch { showToast('Failed to delete journal.', 'error'); }
+    } catch {
+      deletedJournalIdsRef.current.delete(journalId);
+      journalEntries.forEach((entry) => deletedEntryIdsRef.current.delete(entry.id));
+      showToast('Failed to delete journal.', 'error');
+    }
   };
 
   // Drag-to-reorder journals
@@ -559,20 +792,35 @@ export default function App() {
   }, [activeJournal]);
 
   // Export
-  const handleExportBackup = async () => await exportAllData();
+  const handleExportBackup = async () => {
+    const detail = { promises: [] };
+    window.dispatchEvent(new CustomEvent('vedwriter:flush-saves', { detail }));
+    await Promise.all(detail.promises);
+    await Promise.all([...saveQueuesRef.current.values()]);
+    return exportAllData();
+  };
   const handleImportBackup = async (backupData) => {
-    await bulkImport(backupData);
-    handleLock();
-    const s = await getSetting('salt');
-    const v = await getSetting('verifier');
-    const vh = await getSetting('verifier_hash');
-    const it = await getSetting('iterations');
-    if (s && v) {
-      setHasAccount(true);
-      setSalt(s);
-      setVerifier(v);
-      setVerifierHash(vh || '');
-      setIterations(it || 100000);
+    await invalidateAllSaves();
+    try {
+      await bulkImport(backupData);
+      deletedEntryIdsRef.current.clear();
+      deletedJournalIdsRef.current.clear();
+      handleLock();
+      const s = await getSetting('salt');
+      const v = await getSetting('verifier');
+      const vh = await getSetting('verifier_hash');
+      const it = await getSetting('iterations');
+      if (s && v) {
+        setHasAccount(true);
+        setSalt(s);
+        setVerifier(v);
+        setVerifierHash(vh || '');
+        setIterations(it || 100000);
+      }
+    } catch (error) {
+      deletedEntryIdsRef.current.clear();
+      deletedJournalIdsRef.current.clear();
+      throw error;
     }
   };
 
@@ -640,13 +888,7 @@ export default function App() {
       for (const entry of reordered) {
         const newPos = positionMap.get(entry.id);
         await saveEntry({
-          id: entry.id,
-          journalId: entry.journalId,
-          encryptedTitle: entry.encryptedTitle,
-          encryptedBody: entry.encryptedBody,
-          encryptedTags: entry.encryptedTags,
-          dateCreated: entry.dateCreated,
-          dateModified: entry.dateModified,
+          ...entry,
           position: newPos
         });
       }
@@ -658,14 +900,20 @@ export default function App() {
 
   // Bulk delete entries from sidebar
   const handleBulkDeleteEntries = async (entryIds) => {
-    for (const id of entryIds) {
-      await deleteEntry(id);
+    const ids = [...new Set(entryIds || [])];
+    if (!ids.length) return;
+    await Promise.all(ids.map((id) => invalidateEntrySaves(id)));
+    try {
+      await deleteEntries(ids);
+      setEntries(prev => prev.filter(e => !ids.includes(e.id)));
+      if (activeEntry && ids.includes(activeEntry.id)) setActiveEntry(null);
+      showToast(`${ids.length} page(s) deleted.`);
+      setJournals(prev => prev.map(j => j.id === activeJournal.id ? { ...j, entryCount: Math.max(0, j.entryCount - ids.length) } : j));
+      setActiveJournal(prev => prev ? { ...prev, entryCount: Math.max(0, prev.entryCount - ids.length) } : null);
+    } catch {
+      ids.forEach((id) => deletedEntryIdsRef.current.delete(id));
+      showToast('Failed to delete selected pages.', 'error');
     }
-    setEntries(prev => prev.filter(e => !entryIds.includes(e.id)));
-    if (activeEntry && entryIds.includes(activeEntry.id)) setActiveEntry(null);
-    showToast(`${entryIds.length} page(s) deleted.`);
-    setJournals(prev => prev.map(j => j.id === activeJournal.id ? { ...j, entryCount: Math.max(0, j.entryCount - entryIds.length) } : j));
-    setActiveJournal(prev => prev ? { ...prev, entryCount: Math.max(0, prev.entryCount - entryIds.length) } : null);
   };
 
   // Loading
@@ -720,7 +968,23 @@ export default function App() {
               <div className="lock-actions">
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowShareModal(true)}>Restore backup</button>
                 <button type="button" className="btn btn-ghost btn-sm" style={{ color: '#ef4444' }}
-                  onClick={() => { if (window.confirm('Permanently delete all data?')) clearAllData().then(() => { setHasAccount(false); showToast('Database wiped.'); }); }}
+                  onClick={async () => {
+                    if (!window.confirm('Permanently delete all data?')) return;
+                    try {
+                      await invalidateAllSaves();
+                      await clearAllData();
+                      clearKey();
+                      deletedEntryIdsRef.current.clear();
+                      deletedJournalIdsRef.current.clear();
+                      activeJournalIdRef.current = null;
+                      setHasAccount(false);
+                      setIsLocked(true);
+                      setJournals([]); setEntries([]); setActiveJournal(null); setActiveEntry(null);
+                      showToast('Database wiped.');
+                    } catch {
+                      showToast('Factory reset failed.', 'error');
+                    }
+                  }}
                 >Factory reset</button>
               </div>
             </form>
@@ -732,11 +996,32 @@ export default function App() {
     );
   }
 
+  if (edgeWidgetMode) {
+    return (
+      <EdgeWidget
+        activeEntry={activeEntry}
+        activeJournal={activeJournal}
+        entries={entries}
+        journals={journals}
+        onExitWidget={closeEdgeWidget}
+        onLoadJournalEntries={loadWidgetEntries}
+        onLock={handleLock}
+        onSaveWidgetNote={handleSaveWidgetNote}
+        showDiscoveryHintOnOpen={showSidePanelHint}
+      />
+    );
+  }
+
   // 2. Dashboard
   if (!activeJournal) {
     return (
       <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-        <Header onBackup={() => setShowShareModal(true)} onLock={handleLock} onQuickCapture={() => setShowQuickCaptureModal(true)} />
+        <Header
+          onBackup={() => setShowShareModal(true)}
+          onLock={handleLock}
+          onToggleEdgeWidget={openEdgeWidget}
+          onContactDeveloper={() => setShowContactDeveloperModal(true)}
+        />
         <main className="dashboard-container">
           <div className="page-header">
             <h2>My Journals</h2>
@@ -818,7 +1103,7 @@ export default function App() {
 
         <CreateJournalModal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} onCreate={handleCreateJournal} />
         <ShareBackupModal isOpen={showShareModal} onClose={() => setShowShareModal(false)} onExportBackup={handleExportBackup} onImportBackup={handleImportBackup} />
-        <QuickCaptureModal isOpen={showQuickCaptureModal} onClose={() => setShowQuickCaptureModal(false)} onSaveToTemporary={handleSaveToTemporaryJournal} />
+        <ContactDeveloperModal isOpen={showContactDeveloperModal} onClose={() => setShowContactDeveloperModal(false)} />
         {toast.message && <div className={`toast toast-${toast.type}`}>{toast.type === 'success' ? <CheckCircle2 size={16} /> : <ShieldAlert size={16} />}<span>{toast.message}</span></div>}
       </div>
     );
@@ -832,7 +1117,8 @@ export default function App() {
         onBack={() => { setActiveJournal(null); setActiveEntry(null); loadJournals(); }}
         onBackup={() => setShowShareModal(true)} onDeleteJournal={requestDeleteJournal} onLock={handleLock}
         mobileMenuOpen={mobileSidebarOpen} onToggleMobileMenu={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-        onQuickCapture={() => setShowQuickCaptureModal(true)}
+        onToggleEdgeWidget={openEdgeWidget}
+        onContactDeveloper={() => setShowContactDeveloperModal(true)}
       />
       <div className="workspace-container">
         <Sidebar
@@ -844,15 +1130,22 @@ export default function App() {
           mobileOpen={mobileSidebarOpen} pinnedEntries={pinnedEntries} onTogglePin={togglePinEntry}
           onReorderEntries={handleReorderEntries} onBulkDelete={handleBulkDeleteEntries}
         />
-        <Editor entry={activeEntry} onSave={handleSaveEntry} onDelete={handleDeleteEntry}
-          onExport={() => setShowShareModal(true)}
-        />
+        {activeEntry?.entryType === 'canvas' ? (
+          <CanvasErrorBoundary key={activeEntry.id} entryId={activeEntry.id}>
+            <CanvasEntry entry={activeEntry} onSave={handleSaveEntry} onDelete={handleDeleteEntry}
+              onExport={() => setShowShareModal(true)}
+              entries={entries} onOpenEntry={handleOpenEntryFromCanvas} onCreatePage={handleCreatePageFromCanvas}
+            />
+          </CanvasErrorBoundary>
+        ) : (
+          <Editor entry={activeEntry} onSave={handleSaveEntry} onDelete={handleDeleteEntry}
+            onExport={() => setShowShareModal(true)}
+          />
+        )}
       </div>
       <ShareBackupModal isOpen={showShareModal} onClose={() => setShowShareModal(false)} entry={activeEntry}
         onExportBackup={handleExportBackup} onImportBackup={handleImportBackup} />
-      <QuickCaptureModal isOpen={showQuickCaptureModal} onClose={() => setShowQuickCaptureModal(false)} onSaveToTemporary={handleSaveToTemporaryJournal} />
-
-
+      <ContactDeveloperModal isOpen={showContactDeveloperModal} onClose={() => setShowContactDeveloperModal(false)} />
       {/* Mobile FAB for new page */}
       <button className="mobile-fab" onClick={() => handleCreateEntry(null)} title="New page">
         <Plus size={22} />

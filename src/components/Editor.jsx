@@ -7,6 +7,10 @@ import {
 } from 'lucide-react';
 
 import DraftSheetCanvas from './DraftSheetCanvas';
+import { escapeHtml, sanitizeHtml } from '../utils/sanitizeHtml';
+import { subscribeToNativeFileDrop } from '../utils/nativeFileDrop';
+
+const MAX_EDITOR_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 
 
 
@@ -67,11 +71,15 @@ export default function Editor({
   const [slashMenu, setSlashMenu] = useState({ show: false, query: '', selectedIndex: 0 });
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const fileInputRef = useRef(null);
+  const insertAttachmentCardRef = useRef(null);
+  const latestEntryRef = useRef(entry);
+  latestEntryRef.current = entry;
 
   const handleFileSelect = (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
     files.forEach(file => {
+      if (file.size > MAX_EDITOR_ATTACHMENT_BYTES) return;
       const reader = new FileReader();
       reader.onload = (evt) => {
         const dataUrl = evt.target.result;
@@ -156,7 +164,7 @@ export default function Editor({
       setTitle(entry.title || '');
       setTags(entry.tags || []);
       setDrafts(entry.drafts || []);
-      const newBody = entry.body || '';
+      const newBody = sanitizeHtml(entry.body || '');
       if (editorRef.current) {
         editorRef.current.innerHTML = newBody;
         lastBodyRef.current = newBody;
@@ -213,16 +221,41 @@ export default function Editor({
     setHeadings(hs);
   };
 
-  const buildUpdatedEntry = (overrides = {}) => ({
-    ...entry,
-    title,
-    tags,
-    drafts,
-    body: editorRef.current ? editorRef.current.innerHTML : '',
-    wordGoal,
-    dateModified: Date.now(),
-    ...overrides
-  });
+  const buildUpdatedEntry = (overrides = {}) => {
+    const body = sanitizeHtml(overrides.body !== undefined
+      ? overrides.body
+      : editorRef.current ? editorRef.current.innerHTML : '');
+    return {
+      ...entry,
+      title,
+      tags,
+      drafts,
+      wordGoal,
+      dateModified: Date.now(),
+      ...overrides,
+      body,
+    };
+  };
+
+  useEffect(() => {
+    const handleFlushRequest = (event) => {
+      if (!entry || !event.detail?.promises) return;
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      const updated = {
+        ...entry,
+        title,
+        tags,
+        drafts,
+        wordGoal,
+        dateModified: Date.now(),
+        body: sanitizeHtml(editorRef.current ? editorRef.current.innerHTML : ''),
+      };
+      const promise = Promise.resolve(onSave(updated)).then(() => setLastSavedAt(Date.now()));
+      event.detail.promises.push(promise);
+    };
+    window.addEventListener('vedwriter:flush-saves', handleFlushRequest);
+    return () => window.removeEventListener('vedwriter:flush-saves', handleFlushRequest);
+  }, [entry, title, tags, drafts, wordGoal, onSave]);
 
 
   const handleSave = (overrides = {}) => {
@@ -230,8 +263,9 @@ export default function Editor({
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       const updated = buildUpdatedEntry(overrides);
-      onSave(updated);
-      setLastSavedAt(Date.now());
+      Promise.resolve(onSave(updated))
+        .then(() => setLastSavedAt(Date.now()))
+        .catch(() => {});
     }, 800);
   };
 
@@ -239,8 +273,9 @@ export default function Editor({
     if (!entry) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     const updated = buildUpdatedEntry(overrides);
-    onSave(updated);
-    setLastSavedAt(Date.now());
+    Promise.resolve(onSave(updated))
+      .then(() => setLastSavedAt(Date.now()))
+      .catch(() => {});
   };
 
   const handleTitleChange = (e) => {
@@ -252,7 +287,8 @@ export default function Editor({
   // Handle input: auto-pair, snippets, and regular text
   const handleEditorInput = () => {
     if (!editorRef.current) return;
-    const html = editorRef.current.innerHTML;
+    const html = sanitizeHtml(editorRef.current.innerHTML);
+    if (html !== editorRef.current.innerHTML) editorRef.current.innerHTML = html;
     lastBodyRef.current = html;
     calculateCounts(html);
     handleSave({ body: html });
@@ -492,6 +528,7 @@ export default function Editor({
 
     const files = Array.from(e.dataTransfer.files);
     files.forEach(file => {
+      if (file.size > MAX_EDITOR_ATTACHMENT_BYTES) return;
       const reader = new FileReader();
       reader.onload = (evt) => {
         const dataUrl = evt.target.result;
@@ -513,21 +550,23 @@ export default function Editor({
     const isAudio = file.type.startsWith('audio/');
 
     const iconStr = isImage ? '📷' : isAudio ? '🎵' : '📄';
+    const safeName = escapeHtml(file.name || 'Attached file');
+    const safeDataUrl = escapeHtml(dataUrl || '');
 
     let bodyHtml = '';
     if (isImage) {
-      bodyHtml = `<img src="${dataUrl}" alt="${file.name}" class="unified-card-img" />`;
+      bodyHtml = `<img src="${safeDataUrl}" alt="${safeName}" class="unified-card-img" />`;
     } else if (isAudio) {
-      bodyHtml = `<audio controls src="${dataUrl}" class="unified-card-audio"></audio>`;
+      bodyHtml = `<audio controls src="${safeDataUrl}" class="unified-card-audio"></audio>`;
     } else {
-      bodyHtml = `<div class="unified-card-doc-preview"><span>📄 Document attached</span><a href="${dataUrl}" download="${file.name}" style="color: var(--accent); font-weight: 600;">Download ${file.name}</a></div>`;
+      bodyHtml = `<div class="unified-card-doc-preview"><span>📄 Document attached</span><a href="${safeDataUrl}" download="${safeName}">Download ${safeName}</a></div>`;
     }
 
-    card.innerHTML = `
+    card.innerHTML = sanitizeHtml(`
       <div class="unified-card-header">
         <span class="unified-card-info">
           <span class="unified-card-icon">${iconStr}</span>
-          <span class="unified-card-name">${file.name}</span>
+          <span class="unified-card-name">${safeName}</span>
           <span class="unified-card-size">(${formatFileSize(file.size)})</span>
         </span>
         <div class="unified-card-actions">
@@ -537,7 +576,7 @@ export default function Editor({
       <div class="unified-card-body">
         ${bodyHtml}
       </div>
-    `;
+    `);
 
     // Attach remove handler
     card.querySelector('.delete-card-btn')?.addEventListener('click', (ev) => {
@@ -565,6 +604,28 @@ export default function Editor({
     }
     handleEditorInput();
   };
+  insertAttachmentCardRef.current = insertAttachmentCard;
+
+  useEffect(() => {
+    let active = true;
+    let unlisten;
+    subscribeToNativeFileDrop((files) => {
+      if (!active || !latestEntryRef.current) return;
+      files.forEach((file) => {
+        if (file.size > MAX_EDITOR_ATTACHMENT_BYTES) return;
+        const reader = new FileReader();
+        reader.onload = (event) => insertAttachmentCardRef.current?.(file, event.target.result);
+        reader.readAsDataURL(file);
+      });
+    }).then((stop) => {
+      if (!active) stop?.();
+      else unlisten = stop;
+    });
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
 
 
   const pushHistory = () => {
@@ -1261,8 +1322,3 @@ export default function Editor({
   </main>
 );
 }
-
-
-
-
-

@@ -4,7 +4,7 @@
 
 VedWriter is a local-first application. Journal entries are encrypted in the application before being persisted to IndexedDB. The project does not currently provide a server, account system, or built-in synchronization service.
 
-The current implementation uses Web Crypto AES-GCM with 256-bit keys and PBKDF2-SHA-256 with 100,000 iterations. This describes the implementation today; it is not a guarantee that the application protects against every local compromise.
+The current implementation uses Web Crypto AES-GCM with 256-bit keys and PBKDF2-SHA-256 with 600,000 iterations. Legacy databases are upgraded after successful unlock. This describes the implementation today; it is not a guarantee that the application protects against every local compromise.
 
 ## Important limitations
 
