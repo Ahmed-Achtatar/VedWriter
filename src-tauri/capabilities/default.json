@@ -4,6 +4,37 @@
   "description": "default capabilities",
   "windows": ["main"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:window:allow-current-monitor",
+    "core:window:allow-inner-size",
+    "core:window:allow-is-always-on-top",
+    "core:window:allow-outer-position",
+    "core:window:allow-is-decorated",
+    "core:window:allow-is-resizable",
+    "core:window:allow-is-maximizable",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-set-decorations",
+    "core:window:allow-set-focusable",
+    "core:window:allow-set-ignore-cursor-events",
+    "core:window:allow-set-maximizable",
+    "core:window:allow-set-max-size",
+    "core:window:allow-set-min-size",
+    "core:window:allow-set-position",
+    "core:window:allow-set-resizable",
+    "core:window:allow-set-size",
+    "core:window:allow-show",
+    "fs:default",
+    "fs:allow-read-file",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$DESKTOP/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$PICTURE/**" },
+        { "path": "$VIDEO/**" },
+        { "path": "$AUDIO/**" }
+      ]
+    }
   ]
 }

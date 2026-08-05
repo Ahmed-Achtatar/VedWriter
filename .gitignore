@@ -26,3 +26,24 @@ dist-ssr
 # Tauri and Rust build outputs
 src-tauri/target/
 src-tauri/binaries/
+
+# Local agent/tool state
+.agents/
+.codex/
+
+# Local release and packaging artifacts
+/export/
+/public/*.exe
+/public/*.msi
+/public/*.msix
+/public/msix_layout/
+/public/store_*.png
+
+# Local design notes and rejected experiments
+/mockup/
+/docs/rejected_ideas.md
+
+# Local environment files
+.env
+.env.*
+!.env.example

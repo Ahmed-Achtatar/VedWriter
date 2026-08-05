@@ -1,9 +1,9 @@
 // Cryptographic service using native Web Crypto API
-// Key insight: PBKDF2 key derivation is expensive (~100-500ms).
+// Key derivation is intentionally expensive to slow offline password guessing.
 // We derive the key ONCE after unlock and cache it for all subsequent
 // encrypt/decrypt operations. This makes page loading ~10x faster.
 
-const PBKDF2_ITERATIONS = 100000;
+const PBKDF2_ITERATIONS = 600000;
 
 let cachedKey = null;
 

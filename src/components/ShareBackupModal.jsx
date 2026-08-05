@@ -2,6 +2,19 @@ import React, { useState } from 'react';
 import { X, FileDown, Download, Upload, ShieldAlert, CheckCircle, FileText } from 'lucide-react';
 import { encryptText, generateRandomString } from '../services/crypto';
 
+const MAX_BACKUP_FILE_BYTES = 100 * 1024 * 1024;
+const MAX_BACKUP_JOURNALS = 10000;
+const MAX_BACKUP_ENTRIES = 100000;
+
+function isBackupShape(json) {
+  return json && typeof json === 'object' && !Array.isArray(json)
+    && Array.isArray(json.journals)
+    && Array.isArray(json.entries)
+    && Array.isArray(json.settings)
+    && json.journals.length <= MAX_BACKUP_JOURNALS
+    && json.entries.length <= MAX_BACKUP_ENTRIES;
+}
+
 export default function ShareBackupModal({
   isOpen,
   onClose,
@@ -31,6 +44,11 @@ export default function ShareBackupModal({
   const handleImportFileChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > MAX_BACKUP_FILE_BYTES) {
+      setImportFile(null);
+      setImportStatus({ type: 'error', message: 'Backup file is too large.' });
+      return;
+    }
     setImportFile(file);
     setImportStatus({ type: '', message: '' });
     setImportPreview(null);
@@ -39,7 +57,7 @@ export default function ShareBackupModal({
     reader.onload = (ev) => {
       try {
         const json = JSON.parse(ev.target.result);
-        if (!json.journals || !json.entries || !json.settings) {
+        if (!isBackupShape(json)) {
           throw new Error('Invalid structure');
         }
         setImportPreview({
@@ -59,7 +77,7 @@ export default function ShareBackupModal({
     reader.onload = async (e) => {
       try {
         const json = JSON.parse(e.target.result);
-        if (!json.journals || !json.entries || !json.settings) {
+        if (!isBackupShape(json)) {
           throw new Error('Invalid backup file structure.');
         }
         await onImportBackup(json);
