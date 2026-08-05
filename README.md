@@ -8,11 +8,36 @@ VedWriter is an open-source journal and study-notes app built with React and Tau
 
 ## Features
 
-- Private by default: passwords and journal content are not sent to a VedWriter server.
-- Offline-first local storage with IndexedDB.
-- Local AES-GCM-256 encryption using a password-derived key.
-- Multiple journals, pinned pages, covers, reordering, and entry templates.
-- Desktop packaging for Windows, macOS, and Linux through Tauri 2.
+### Private journal workspace
+
+- Password-protected journals stored locally in IndexedDB.
+- AES-GCM-256 encryption with a PBKDF2-SHA-256 password-derived key.
+- Rich-text pages with headings, lists, formatting, tags, search, pinning, reordering, and templates.
+- Drag-and-drop attachments for images, audio, video, PDFs, and documents.
+- Multiple journals with covers, page management, and mobile-friendly navigation.
+
+### Canvas pages
+
+- Create Sticky Notes, Mind Maps, Kanban Boards, Moodboards, and Whiteboards.
+- Move, resize, edit, connect, group, collapse, and organize cards on a freeform canvas.
+- Add images and media, use focus mode and keyboard shortcuts, and search canvas cards.
+- Export a canvas as PNG, SVG, or print/PDF, or send selected canvas content to a regular page.
+
+### Side panel
+
+- Open the named Side panel from the normal app and reveal it from the screen edge.
+- Pin it to keep it open, or let it stay unobtrusive when it is not being used.
+- Choose any journal and regular page, load its existing content, and edit the page freely.
+- Create a new page directly from the panel; canvas pages are intentionally excluded from its page editor.
+
+### Backup and sharing
+
+- Export and restore the complete encrypted database as a local backup.
+- Export an individual page as Markdown, plain text, or print/PDF.
+- Create a password-protected, self-decrypting HTML copy of an individual page.
+- Contact the developer from the normal app through email or WhatsApp.
+
+VedWriter does not include a cloud backend, account system, synchronization service, or built-in analytics.
 
 ## Screenshot
 
@@ -33,7 +58,7 @@ npm install
 npm run dev
 ```
 
-Run the native desktop shell with `npm run tauri:dev`. Build the web app with `npm run build` or desktop installers with `npm run tauri:build`.
+Run the native desktop shell with `npm run tauri:dev`. Build the web app with `npm run build`, or create a local desktop release with `npm run tauri:build`. Generated release files are intentionally not committed to the repository.
 
 ## Security at a glance
 
